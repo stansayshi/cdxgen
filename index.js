@@ -4852,7 +4852,7 @@ export const createBom = async (path, options) => {
 export async function submitBom(args, bomContents) {
   const serverUrl = args.serverUrl.replace(/\/$/, "") + "/api/v1/bom";
   // Custom user-agent for cdxgen - Add custom test agent
-  const userAgent = process.env.USER_AGENT || `@CycloneDX/cdxgen ${_version}`;
+  const userAgent = process.env.USER_AGENT
   let encodedBomContents = Buffer.from(JSON.stringify(bomContents)).toString(
     "base64"
   );

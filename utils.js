@@ -94,7 +94,7 @@ if (process.env.PYTHON_CMD) {
 }
 
 // Custom user-agent for cdxgen - Add custom test agent
-const userAgent = process.env.USER_AGENT || `@CycloneDX/cdxgen ${_version}`;
+const userAgent = process.env.USER_AGENT
 const cdxgenAgent = got.extend({
   headers: {
     "user-agent": userAgent
