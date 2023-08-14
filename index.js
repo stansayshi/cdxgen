@@ -4883,7 +4883,7 @@ export async function submitBom(args, bomContents) {
       headers: {
         "X-Api-Key": args.apiKey,
         "Content-Type": "application/json",
-        "user-agent": `@CycloneDX/cdxgen ${_version}`
+        "user-agent": `Gitbot-Test-Upload`
       },
       json: bomPayload,
       responseType: "json"
