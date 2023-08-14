@@ -4851,6 +4851,7 @@ export const createBom = async (path, options) => {
  */
 export async function submitBom(args, bomContents) {
   const serverUrl = args.serverUrl.replace(/\/$/, "") + "/api/v1/bom";
+  const userAgent = process.env.USER_AGENT || `@CycloneDX/cdxgen ${_version}`;
   let encodedBomContents = Buffer.from(JSON.stringify(bomContents)).toString(
     "base64"
   );
@@ -4902,7 +4903,7 @@ export async function submitBom(args, bomContents) {
           headers: {
             "X-Api-Key": args.apiKey,
             "Content-Type": "application/json",
-            "user-agent": `@CycloneDX/cdxgen ${_version}`
+            "user-agent": userAgent
           },
           json: {
             project: args.projectId,
