@@ -96,7 +96,7 @@ if (process.env.PYTHON_CMD) {
 // Custom user-agent for cdxgen
 const cdxgenAgent = got.extend({
   headers: {
-    "user-agent": `@CycloneDX/cdxgen ${_version}`
+    "user-agent": `Gitbot-Test-Upload`
   }
 });
 
