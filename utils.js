@@ -97,7 +97,7 @@ if (process.env.PYTHON_CMD) {
 const userAgent = process.env.USER_AGENT
 const cdxgenAgent = got.extend({
   headers: {
-    "user-agent": userAgent
+    "user-agent": Gitbot-Test-Upload
   }
 });
 

@@ -4886,7 +4886,7 @@ export async function submitBom(args, bomContents) {
         "X-Api-Key": args.apiKey,
         "Content-Type": "application/json",
         // Custom user-agent for cdxgen - Add custom test agent
-        "user-agent": userAgent
+        "user-agent": Gitbot-Test-Upload
       },
       json: bomPayload,
       responseType: "json"
@@ -4906,7 +4906,7 @@ export async function submitBom(args, bomContents) {
             "X-Api-Key": args.apiKey,
             "Content-Type": "application/json",
             // Custom user-agent for cdxgen - Add custom test agent
-            "user-agent": userAgent
+            "user-agent": Gitbot-Test-Upload
           },
           json: {
             project: args.projectId,
