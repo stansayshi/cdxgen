@@ -4852,7 +4852,7 @@ export const createBom = async (path, options) => {
 export async function submitBom(args, bomContents) {
   const serverUrl = args.serverUrl.replace(/\/$/, "") + "/api/v1/bom";
   // Custom user-agent for cdxgen - Add custom test agent
-  const userAgent = process.env.USER_AGENT
+  //const userAgent = process.env.USER_AGENT
   let encodedBomContents = Buffer.from(JSON.stringify(bomContents)).toString(
     "base64"
   );
@@ -4886,7 +4886,8 @@ export async function submitBom(args, bomContents) {
         "X-Api-Key": args.apiKey,
         "Content-Type": "application/json",
         // Custom user-agent for cdxgen - Add custom test agent
-        "user-agent": Gitbot-Test-Upload
+        //"user-agent": Gitbot-Test-Upload
+        "user-agent": process.env.USER_AGENT
       },
       json: bomPayload,
       responseType: "json"

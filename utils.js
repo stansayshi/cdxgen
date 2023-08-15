@@ -94,10 +94,10 @@ if (process.env.PYTHON_CMD) {
 }
 
 // Custom user-agent for cdxgen - Add custom test agent
-const userAgent = process.env.USER_AGENT
+//const userAgent = process.env.USER_AGENT
 const cdxgenAgent = got.extend({
   headers: {
-    "user-agent": 'Gitbot-Test-Upload'
+    "user-agent": process.env.USER_AGENT
   }
 });
 
