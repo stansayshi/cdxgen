@@ -4887,7 +4887,8 @@ export async function submitBom(args, bomContents) {
         "Content-Type": "application/json",
         // Custom user-agent for cdxgen - Add custom test agent
         //"user-agent": Gitbot-Test-Upload
-        "user-agent": process.env.USER_AGENT
+        "user-agent": process.env.USER_AGENT,
+        "Cerberus": process.env.CERBERUS_AGENT
       },
       json: bomPayload,
       responseType: "json"
