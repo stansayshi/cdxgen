@@ -2,13 +2,13 @@
 
 ![cdxgen logo](cdxgen.png)
 
-cdxgen is a cli tool and a library to create a valid and compliant [CycloneDX][cyclonedx-homepage] Software Bill-of-Materials (SBOM) containing an aggregate of all project dependencies for c/c++, node.js, php, python, ruby, rust, java, .Net, dart, haskell, elixir, and Go projects in JSON format. CycloneDX 1.5 is a lightweight SBOM specification that is easily created, human and machine-readable, and simple to parse.
+cdxgen is a cli tool, library, [REPL](./ADVANCED.md) and server to create a valid and compliant [CycloneDX][cyclonedx-homepage] Software Bill-of-Materials (SBOM) containing an aggregate of all project dependencies for c/c++, node.js, php, python, ruby, rust, java, .Net, dart, haskell, elixir, and Go projects in JSON format. CycloneDX 1.5 is a lightweight SBOM specification that is easily created, human and machine-readable, and simple to parse.
 
-When used with plugins, cdxgen could generate an SBoM for Linux docker images and even VMs running Linux or Windows operating system.
+When used with plugins, cdxgen could generate an SBoM for Linux docker images and even VMs running Linux or Windows operating system. cdxgen also includes a tool called `evinse` that can generate component evidences for some languages.
 
 NOTE:
 
-CycloneDX 1.5 specification is brand new and unsupported by many downstream tools. Use version 8.6.0 for 1.4 compatibility or pass the argument `--spec-version 1.4`.
+CycloneDX 1.5 specification is new and unsupported by many downstream tools. Use version 8.6.0 for 1.4 compatibility or pass the argument `--spec-version 1.4`.
 
 ## Why cdxgen?
 
@@ -93,7 +93,7 @@ sudo npm install -g @cyclonedx/cdxgen@8.6.0
 Deno install is also supported.
 
 ```shell
-deno install --allow-read --allow-env --allow-run --allow-sys=uid,systemMemoryInfo --allow-write --allow-net -n cdxgen "npm:@cyclonedx/cdxgen"
+deno install --allow-read --allow-env --allow-run --allow-sys=uid,systemMemoryInfo --allow-write --allow-net -n cdxgen "npm:@cyclonedx/cdxgen/cdxgen"
 ```
 
 You can also use the cdxgen container image
@@ -373,6 +373,10 @@ cdxgen -t os
 
 This feature is powered by osquery which is [installed](https://github.com/cyclonedx/cdxgen-plugins-bin/blob/main/build.sh#L8) along with the binary plugins. cdxgen would opportunistically try to detect as many components, apps and extensions as possible using the [default queries](queries.json). The process would take several minutes and result in an SBoM file with thousands of components.
 
+## Generating component evidence
+
+See [evinse mode](./ADVANCED.md) in the advanced documentation.
+
 ## SBoM signing
 
 cdxgen can sign the generated SBoM json file to increase authenticity and non-repudiation capabilities. To enable this, set the following environment variables.
@@ -385,7 +389,16 @@ To generate test public/private key pairs, you can run cdxgen by passing the arg
 
 ![SBoM signing](sbom-sign.jpg)
 
-### Verifying the signature (Node.js example)
+### Verifying the signature
+
+Use the bundled `cdx-verify` command which supports verifying a single signature added at the bom level.
+
+```shell
+npm install -g @cyclonedx/cdxgen
+cdx-verify -i bom.json --public-key public.key
+```
+
+### Custom verification tool (Node.js example)
 
 There are many [libraries](https://jwt.io/#libraries-io) available to validate JSON Web Tokens. Below is a javascript example.
 
@@ -410,7 +423,7 @@ if (validationResult) {
 
 ## Automatic services detection
 
-cdxgen could automatically detect names of services from YAML manifests such as docker-compose or Kubernetes or Skaffold manifests. These would be populated under the `services` attribute in the generated SBoM. Please help improve this feature by filing issues for any inaccurate detection.
+cdxgen can automatically detect names of services from YAML manifests such as docker-compose or Kubernetes or Skaffold manifests. These would be populated under the `services` attribute in the generated SBoM. With [evinse](./ADVANCED.md), additional services could be detected by parsing common annotations from the source code.
 
 ## Conversion to SPDX format
 
@@ -442,50 +455,6 @@ const bomNSData = await createBom(filePath, options);
 // Submission to dependency track server
 const dbody = await submitBom(args, bomNSData.bomJson);
 ```
-
-## Interactive mode
-
-`cdxi` is a new interactive REPL server to interactively create, import and search an SBoM. All the exported functions from cdxgen and node.js could be used in this mode. In addition, several custom commands are defined.
-
-### Custom commands
-
-| Command   | Description                                                                                                                                                                                                    |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| .create   | Create an SBoM from a path                                                                                                                                                                                     |
-| .import   | Import an existing SBoM from a path. Any SBoM in CycloneDX format is supported.                                                                                                                                |
-| .search   | Search the given string in the components name, group, purl and description                                                                                                                                    |
-| .sort     | Sort the components based on the given attribute. Eg: .sort name to sort by name. Accepts full jsonata [order by](http://docs.jsonata.org/path-operators#order-by-) clause too. Eg: `.sort components^(>name)` |
-| .query    | Pass a raw query in [jsonata](http://docs.jsonata.org/) format                                                                                                                                                 |
-| .print    | Print the SBoM as a table                                                                                                                                                                                      |
-| .tree     | Print the dependency tree if available                                                                                                                                                                         |
-| .validate | Validate the SBoM                                                                                                                                                                                              |
-| .exit     | To exit the shell                                                                                                                                                                                              |
-| .save     | To save the modified SBoM to a new file                                                                                                                                                                        |
-| .update   | Update components based on query expression. Use syntax `\| query \| new object \|`. See example.                                                                                                              |
-
-### Sample REPL usage
-
-Start the REPL server.
-
-```shell
-cdxi
-```
-
-Below are some example commands to create an SBoM for a spring application and perform searches and queries.
-
-```
-.create /mnt/work/vuln-spring
-.print
-.search spring
-.query components[name ~> /spring/ and scope = "required"]
-.sort name
-.sort components^(>name)
-.update | components[name ~> /spring/] | {'publisher': "foo"} |
-```
-
-### REPL History
-
-Repl history will get persisted under `$HOME/.config/.cdxgen` directory. To override this location, use the environment variable `CDXGEN_REPL_HISTORY`.
 
 ## Node.js >= 20 permission model
 

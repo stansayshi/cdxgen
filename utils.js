@@ -1,5 +1,5 @@
 import { globSync } from "glob";
-import { tmpdir, platform, freemem } from "node:os";
+import { homedir, tmpdir, platform, freemem } from "node:os";
 import {
   dirname,
   sep as _sep,
@@ -11,6 +11,7 @@ import {
 import {
   existsSync,
   readFileSync,
+  lstatSync,
   mkdtempSync,
   rmSync,
   copyFileSync,
@@ -26,19 +27,19 @@ let url = import.meta.url;
 if (!url.startsWith("file://")) {
   url = new URL(`file://${import.meta.url}`).toString();
 }
-const dirName = import.meta ? dirname(fileURLToPath(url)) : __dirname;
+const dirNameStr = import.meta ? dirname(fileURLToPath(url)) : __dirname;
 
 const licenseMapping = JSON.parse(
-  readFileSync(join(dirName, "data", "lic-mapping.json"))
+  readFileSync(join(dirNameStr, "data", "lic-mapping.json"))
 );
 const vendorAliases = JSON.parse(
-  readFileSync(join(dirName, "data", "vendor-alias.json"))
+  readFileSync(join(dirNameStr, "data", "vendor-alias.json"))
 );
 const spdxLicenses = JSON.parse(
-  readFileSync(join(dirName, "data", "spdx-licenses.json"))
+  readFileSync(join(dirNameStr, "data", "spdx-licenses.json"))
 );
 const knownLicenses = JSON.parse(
-  readFileSync(join(dirName, "data", "known-licenses.json"))
+  readFileSync(join(dirNameStr, "data", "known-licenses.json"))
 );
 import { load } from "cheerio";
 import { load as _load } from "js-yaml";
@@ -50,17 +51,17 @@ import { parseEDNString } from "edn-data";
 import { PackageURL } from "packageurl-js";
 import { getTreeWithPlugin } from "./piptree.js";
 
-const selfPJson = JSON.parse(readFileSync(join(dirName, "package.json")));
+const selfPJson = JSON.parse(readFileSync(join(dirNameStr, "package.json")));
 const _version = selfPJson.version;
 
 // Refer to contrib/py-modules.py for a script to generate this list
 // The script needs to be used once every few months to update this list
 const PYTHON_STD_MODULES = JSON.parse(
-  readFileSync(join(dirName, "data", "python-stdlib.json"))
+  readFileSync(join(dirNameStr, "data", "python-stdlib.json"))
 );
 // Mapping between modules and package names
 const PYPI_MODULE_PACKAGE_MAPPING = JSON.parse(
-  readFileSync(join(dirName, "data", "pypi-pkg-aliases.json"))
+  readFileSync(join(dirNameStr, "data", "pypi-pkg-aliases.json"))
 );
 
 // Debug mode flag
@@ -1449,7 +1450,7 @@ export const parseGradleDep = function (
     }
     let stack = [last_purl];
     const depRegex =
-      /^.*?--- +(?<group>[^\s:]+):(?<name>[^\s:]+)(?::(?:{strictly [[]?)?(?<versionspecified>[^,\s:}]+))?(?:})?(?:[^->]* +-> +(?<versionoverride>[^\s:]+))?/gm;
+      /^.*?--- +(?<groupspecified>[^\s:]+) ?:(?<namespecified>[^\s:]+)(?::(?:{strictly [[]?)?(?<versionspecified>[^,\s:}]+))?(?:})?(?:[^->]* +-> +(?:(?<groupoverride>[^\s:]+):(?<nameoverride>[^\s:]+):)?(?<versionoverride>[^\s:]+))?/gm;
     for (const rline of rawOutput.split("\n")) {
       if (!rline) {
         continue;
@@ -1467,16 +1468,9 @@ export const parseGradleDep = function (
         rline.startsWith("\\--- ")
       ) {
         last_level = 1;
-        if (rline.startsWith("+--- project :")) {
-          const tmpProj = rline.split("+--- project :");
-          last_project_purl = `pkg:maven/${tmpProj[1].trim()}@${rootProjectVersion}?type=jar`;
-          stack = [last_project_purl];
-          last_purl = last_project_purl;
-        } else {
-          last_project_purl = first_purl;
-          last_purl = last_project_purl;
-          stack = [first_purl];
-        }
+        last_project_purl = first_purl;
+        last_purl = last_project_purl;
+        stack = [first_purl];
       }
       if (rline.includes(" - ")) {
         profileName = rline.split(" - ")[0];
@@ -1489,76 +1483,86 @@ export const parseGradleDep = function (
         }
       }
       while ((match = depRegex.exec(rline))) {
-        const [line, group, name, versionspecified, versionoverride] = match;
+        const [
+          line,
+          groupspecified,
+          namespecified,
+          versionspecified,
+          groupoverride,
+          nameoverride,
+          versionoverride
+        ] = match;
+        const group = groupoverride || groupspecified;
+        const name = nameoverride || namespecified;
         const version = versionoverride || versionspecified;
-        const level = line.split(group)[0].length / 5;
-        if (version !== undefined) {
+        const level = line.split(groupspecified)[0].length / 5;
+        if (version !== undefined || group === "project") {
           let purlString = new PackageURL(
             "maven",
-            group,
+            group !== "project" ? group : rootProjectGroup,
             name,
-            version,
+            version !== undefined ? version : rootProjectVersion,
             { type: "jar" },
             null
           ).toString();
           purlString = decodeURIComponent(purlString);
           keys_cache[purlString + "_" + last_purl] = true;
-          if (group !== "project") {
-            // Filter duplicates
-            if (!deps_keys_cache[purlString]) {
-              deps_keys_cache[purlString] = true;
-              const adep = {
-                group,
-                name: name,
-                version: version,
-                qualifiers: { type: "jar" }
-              };
-              if (scope) {
-                adep["scope"] = scope;
-              }
-              if (profileName) {
-                adep.properties = [
-                  {
-                    name: "GradleProfileName",
-                    value: profileName
-                  }
-                ];
-              }
-              deps.push(adep);
+          // Filter duplicates
+          if (!deps_keys_cache[purlString]) {
+            deps_keys_cache[purlString] = true;
+            const adep = {
+              group: group !== "project" ? group : rootProjectGroup,
+              name: name,
+              version: version !== undefined ? version : rootProjectVersion,
+              qualifiers: { type: "jar" }
+            };
+            adep["purl"] = purlString;
+            adep["bom-ref"] = purlString;
+            if (scope) {
+              adep["scope"] = scope;
             }
-            if (!level_trees[purlString]) {
-              level_trees[purlString] = [];
+            if (profileName) {
+              adep.properties = [
+                {
+                  name: "GradleProfileName",
+                  value: profileName
+                }
+              ];
             }
-            if (level == 0) {
-              stack = [first_purl];
-              stack.push(purlString);
-            } else if (last_purl === "") {
-              stack.push(purlString);
-            } else if (level > last_level) {
-              const cnodes = level_trees[last_purl] || [];
-              if (!cnodes.includes(purlString)) {
-                cnodes.push(purlString);
-              }
-              level_trees[last_purl] = cnodes;
-              if (stack[stack.length - 1] !== purlString) {
-                stack.push(purlString);
-              }
-            } else {
-              for (let i = level; i <= last_level; i++) {
-                stack.pop();
-              }
-              const last_stack =
-                stack.length > 0 ? stack[stack.length - 1] : last_project_purl;
-              const cnodes = level_trees[last_stack] || [];
-              if (!cnodes.includes(purlString)) {
-                cnodes.push(purlString);
-              }
-              level_trees[last_stack] = cnodes;
-              stack.push(purlString);
-            }
-            last_level = level;
-            last_purl = purlString;
+            deps.push(adep);
           }
+          if (!level_trees[purlString]) {
+            level_trees[purlString] = [];
+          }
+          if (level == 0) {
+            stack = [first_purl];
+            stack.push(purlString);
+          } else if (last_purl === "") {
+            stack.push(purlString);
+          } else if (level > last_level) {
+            const cnodes = level_trees[last_purl] || [];
+            if (!cnodes.includes(purlString)) {
+              cnodes.push(purlString);
+            }
+            level_trees[last_purl] = cnodes;
+            if (stack[stack.length - 1] !== purlString) {
+              stack.push(purlString);
+            }
+          } else {
+            for (let i = level; i <= last_level; i++) {
+              stack.pop();
+            }
+            const last_stack =
+              stack.length > 0 ? stack[stack.length - 1] : last_project_purl;
+            const cnodes = level_trees[last_stack] || [];
+            if (!cnodes.includes(purlString)) {
+              cnodes.push(purlString);
+            }
+            level_trees[last_stack] = cnodes;
+            stack.push(purlString);
+          }
+          last_level = level;
+          last_purl = purlString;
         }
       }
     }
@@ -4851,48 +4855,100 @@ export const parseSwiftResolved = (resolvedFile) => {
  *
  * @param {string} mavenCmd Maven command to use
  * @param {string} basePath Path to the maven project
+ * @param {boolean} cleanup Remove temporary directories
+ * @param {boolean} includeCacheDir Include maven and gradle cache directories
  */
-export const collectMvnDependencies = function (mavenCmd, basePath) {
-  const tempDir = mkdtempSync(join(tmpdir(), "mvn-deps-"));
-  console.log(
-    `Executing 'mvn dependency:copy-dependencies -DoutputDirectory=${tempDir} -DexcludeTransitive=true -DincludeScope=runtime' in ${basePath}`
-  );
-  const result = spawnSync(
-    mavenCmd,
-    [
-      "dependency:copy-dependencies",
-      `-DoutputDirectory=${tempDir}`,
-      "-DexcludeTransitive=true",
-      "-DincludeScope=runtime",
-      "-U",
-      "-Dmdep.prependGroupId=" + (process.env.MAVEN_PREPEND_GROUP || "false"),
-      "-Dmdep.stripVersion=" + (process.env.MAVEN_STRIP_VERSION || "false")
-    ],
-    { cwd: basePath, encoding: "utf-8" }
-  );
+export const collectMvnDependencies = function (
+  mavenCmd,
+  basePath,
+  cleanup = true,
+  includeCacheDir = false
+) {
   let jarNSMapping = {};
-  if (result.status !== 0 || result.error) {
-    console.error(result.stdout, result.stderr);
+  const MAVEN_CACHE_DIR =
+    process.env.MAVEN_CACHE_DIR || join(homedir(), ".m2", "repository");
+  const tempDir = mkdtempSync(join(tmpdir(), "mvn-deps-"));
+  const copyArgs = [
+    "dependency:copy-dependencies",
+    `-DoutputDirectory=${tempDir}`,
+    "-U",
+    "-Dmdep.copyPom=true",
+    "-Dmdep.useRepositoryLayout=true",
+    "-Dmdep.includeScope=compile",
+    "-Dmdep.prependGroupId=" + (process.env.MAVEN_PREPEND_GROUP || "false"),
+    "-Dmdep.stripVersion=" + (process.env.MAVEN_STRIP_VERSION || "false")
+  ];
+  if (basePath && basePath !== MAVEN_CACHE_DIR) {
     console.log(
-      "Resolve the above maven error. You can try the following remediation tips:\n"
+      `Executing '${mavenCmd} dependency:copy-dependencies ${copyArgs.join(
+        " "
+      )}' in ${basePath}`
     );
-    console.log(
-      "1. Check if the correct version of maven is installed and available in the PATH."
-    );
-    console.log(
-      "2. Perform 'mvn compile package' before invoking this command. Fix any errors found during this invocation."
-    );
-    console.log(
-      "3. Ensure the temporary directory is available and has sufficient disk space to copy all the artifacts."
-    );
-  } else {
-    jarNSMapping = collectJarNS(tempDir);
+    const result = spawnSync(mavenCmd, copyArgs, {
+      cwd: basePath,
+      encoding: "utf-8"
+    });
+    if (result.status !== 0 || result.error) {
+      console.error(result.stdout, result.stderr);
+      console.log(
+        "Resolve the above maven error. You can try the following remediation tips:\n"
+      );
+      console.log(
+        "1. Check if the correct version of maven is installed and available in the PATH."
+      );
+      console.log(
+        "2. Perform 'mvn compile package' before invoking this command. Fix any errors found during this invocation."
+      );
+      console.log(
+        "3. Ensure the temporary directory is available and has sufficient disk space to copy all the artifacts."
+      );
+    } else {
+      jarNSMapping = collectJarNS(tempDir);
+    }
   }
+  if (includeCacheDir || basePath === MAVEN_CACHE_DIR) {
+    // slow operation
+    jarNSMapping = collectJarNS(MAVEN_CACHE_DIR);
+  }
+
   // Clean up
-  if (tempDir && tempDir.startsWith(tmpdir()) && rmSync) {
-    console.log(`Cleaning up ${tempDir}`);
+  if (cleanup && tempDir && tempDir.startsWith(tmpdir()) && rmSync) {
     rmSync(tempDir, { recursive: true, force: true });
   }
+  return jarNSMapping;
+};
+
+export const collectGradleDependencies = (
+  gradleCmd,
+  basePath,
+  cleanup = true, // eslint-disable-line no-unused-vars
+  includeCacheDir = false // eslint-disable-line no-unused-vars
+) => {
+  // HELP WANTED: We need an init script that mimics maven copy-dependencies that only collects the project specific jars and poms
+  // Construct gradle cache directory
+  let GRADLE_CACHE_DIR =
+    process.env.GRADLE_CACHE_DIR ||
+    join(homedir(), ".gradle", "caches", "modules-2", "files-2.1");
+  if (process.env.GRADLE_USER_HOME) {
+    GRADLE_CACHE_DIR = join(
+      process.env.GRADLE_USER_HOME,
+      "caches",
+      "modules-2",
+      "files-2.1"
+    );
+  }
+  if (DEBUG_MODE) {
+    console.log("Collecting jars from", GRADLE_CACHE_DIR);
+    console.log(
+      "To improve performance, ensure only the project dependencies are present in this cache location."
+    );
+  }
+  const pomPathMap = {};
+  const pomFiles = getAllFiles(GRADLE_CACHE_DIR, "**/*.pom");
+  for (const apom of pomFiles) {
+    pomPathMap[basename(apom)] = apom;
+  }
+  const jarNSMapping = collectJarNS(GRADLE_CACHE_DIR, pomPathMap);
   return jarNSMapping;
 };
 
@@ -4900,10 +4956,11 @@ export const collectMvnDependencies = function (mavenCmd, basePath) {
  * Method to collect class names from all jars in a directory
  *
  * @param {string} jarPath Path containing jars
+ * @param {object} pomPathMap Map containing jar to pom names. Required to successful parse gradle cache.
  *
  * @return object containing jar name and class list
  */
-export const collectJarNS = function (jarPath) {
+export const collectJarNS = function (jarPath, pomPathMap = {}) {
   const jarNSMapping = {};
   console.log(
     `About to identify class names for all jars in the path ${jarPath}`
@@ -4912,31 +4969,72 @@ export const collectJarNS = function (jarPath) {
   const jarFiles = getAllFiles(jarPath, "**/*.jar");
   if (jarFiles && jarFiles.length) {
     for (const jf of jarFiles) {
-      const jarname = basename(jf);
+      const jarname = jf;
+      const pomname =
+        pomPathMap[basename(jf).replace(".jar", ".pom")] ||
+        jarname.replace(".jar", ".pom");
+      let pomData = undefined;
+      let purl = undefined;
+      if (existsSync(pomname)) {
+        pomData = parsePomXml(readFileSync(pomname, "utf-8"));
+        if (pomData) {
+          const purlObj = new PackageURL(
+            "maven",
+            pomData.groupId || "",
+            pomData.artifactId,
+            pomData.version,
+            { type: "jar" },
+            null
+          );
+          purl = purlObj.toString();
+        }
+      } else if (jf.includes(join(".gradle", "caches"))) {
+        // Let's try our best to construct a purl for gradle cache entries of the form
+        // .gradle/caches/modules-2/files-2.1/org.xmlresolver/xmlresolver/4.2.0/f4dbdaa83d636dcac91c9003ffa7fb173173fe8d/xmlresolver-4.2.0-data.jar
+        const tmpA = jf.split(join("files-2.1", ""));
+        if (tmpA && tmpA.length) {
+          let tmpJarPath = tmpA[tmpA.length - 1];
+          // This would yield xmlresolver-4.2.0-data.jar
+          const jarFileName = basename(tmpJarPath);
+          let tmpDirParts = dirname(tmpJarPath).split(_sep);
+          // This would remove the hash from the end of the directory name
+          tmpDirParts.pop();
+          // Retrieve the version
+          const jarVersion = tmpDirParts.pop();
+          // The result would form the group name
+          const jarGroupName = tmpDirParts.join(".").replace(/^\./, "");
+          const purlObj = new PackageURL(
+            "maven",
+            jarGroupName,
+            jarFileName.replace(`-${jarVersion}`, ""),
+            jarVersion,
+            { type: "jar" },
+            null
+          );
+          purl = purlObj.toString();
+        }
+      }
       if (DEBUG_MODE) {
         console.log(`Executing 'jar tf ${jf}'`);
       }
       const jarResult = spawnSync("jar", ["-tf", jf], { encoding: "utf-8" });
-      if (jarResult.status !== 0) {
-        console.error(jarResult.stdout, jarResult.stderr);
-        console.log(
-          "Check if JRE is installed and the jar command is available in the PATH."
-        );
-        break;
-      } else {
-        const consolelines = (jarResult.stdout || "").split("\n");
-        const nsList = consolelines
-          .filter((l) => {
-            return l.includes(".class") && !l.includes("-INF");
-          })
-          .map((e) => {
-            return e
-              .replace(/\/$/, "")
-              .replace(/\//g, ".")
-              .replace(".class", "");
-          });
-        jarNSMapping[jarname] = nsList;
-      }
+      const consolelines = (jarResult.stdout || "").split("\n");
+      const nsList = consolelines
+        .filter((l) => {
+          return (
+            l.includes(".class") &&
+            !l.includes("-INF") &&
+            !l.includes("module-info")
+          );
+        })
+        .map((e) => {
+          return e.replace(".class", "").replace(/\/$/, "").replace(/\//g, ".");
+        });
+      jarNSMapping[purl || jf] = {
+        jarFile: jf,
+        pom: pomData,
+        namespaces: nsList
+      };
     }
     if (!jarNSMapping) {
       console.log(`Unable to determine class names for the jars in ${jarPath}`);
@@ -4944,10 +5042,67 @@ export const collectJarNS = function (jarPath) {
   } else {
     console.log(`${jarPath} did not contain any jars.`);
   }
-  if (DEBUG_MODE) {
-    console.log("JAR Namespace mapping", jarNSMapping);
-  }
   return jarNSMapping;
+};
+
+export const convertJarNSToPackages = (jarNSMapping) => {
+  let pkgList = [];
+  for (const purl of Object.keys(jarNSMapping)) {
+    let { jarFile, pom, namespaces } = jarNSMapping[purl];
+    if (!pom) {
+      pom = {};
+    }
+    let purlObj = undefined;
+    try {
+      purlObj = PackageURL.fromString(purl);
+    } catch (e) {
+      // ignore
+      purlObj = {};
+    }
+    const name = pom.artifactId || purlObj.name;
+    if (!name) {
+      continue;
+    }
+    const apackage = {
+      name,
+      group: pom.groupId || purlObj.namespace || "",
+      version: pom.version || purlObj.version,
+      description: (pom.description || "").trim(),
+      purl,
+      "bom-ref": purl,
+      evidence: {
+        identity: {
+          field: "purl",
+          confidence: 0.5,
+          methods: [
+            {
+              technique: "filename",
+              confidence: 1,
+              value: jarFile
+            }
+          ]
+        }
+      },
+      properties: [
+        {
+          name: "SrcFile",
+          value: jarFile
+        },
+        {
+          name: "Namespaces",
+          value: namespaces.join("\n")
+        }
+      ]
+    };
+    if (pom.url) {
+      apackage["homepage"] = { url: pom.url };
+    }
+    if (pom.scm) {
+      apackage["repository"] = { url: pom.scm };
+    }
+    pkgList.push(apackage);
+  }
+  return pkgList;
 };
 
 export const parsePomXml = function (pomXmlData) {
@@ -5418,7 +5573,7 @@ export const getAtomCommand = () => {
   }
   const NODE_CMD = process.env.NODE_CMD || "node";
   const localAtom = join(
-    dirName,
+    dirNameStr,
     "node_modules",
     "@appthreat",
     "atom",
@@ -5431,6 +5586,8 @@ export const getAtomCommand = () => {
 };
 
 export const executeAtom = (src, args) => {
+  let cwd =
+    existsSync(src) && lstatSync(src).isDirectory() ? src : dirname(src);
   let ATOM_BIN = getAtomCommand();
   if (ATOM_BIN.includes(" ")) {
     const tmpA = ATOM_BIN.split(" ");
@@ -5448,7 +5605,7 @@ export const executeAtom = (src, args) => {
     JAVA_OPTS: `-Xms${freeMemoryGB}G -Xmx${freeMemoryGB}G`
   };
   const result = spawnSync(ATOM_BIN, args, {
-    cwd: src,
+    cwd,
     encoding: "utf-8",
     timeout: TIMEOUT_MS,
     env
